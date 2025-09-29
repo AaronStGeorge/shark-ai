@@ -445,22 +445,34 @@ hipdnnPluginStatus_t hipdnnEnginePluginExecuteOpGraph(
   FUSILLI_PLUGIN_CHECK_NULL(executionContext);
   FUSILLI_PLUGIN_CHECK_NULL(deviceBuffers);
 
-  std::unordered_map<std::shared_ptr<fusilli::TensorAttr>,
-                     std::shared_ptr<fusilli::Buffer>>
-      variantPack;
-
+  // Params and allocators hoisted out of loop below.
   iree_hal_allocator_t *deviceAllocator =
       iree_hal_device_allocator(handle->fusilliHandle);
-  iree_allocator_t ireeHoastAllocator = iree_allocator_system();
+  iree_allocator_t ireeHostAllocator = iree_allocator_system();
   iree_hal_buffer_params_t bufferParams = {
       .usage = IREE_HAL_BUFFER_USAGE_DEFAULT,
       .access = IREE_HAL_MEMORY_ACCESS_READ | IREE_HAL_MEMORY_ACCESS_WRITE,
       .type = IREE_HAL_MEMORY_TYPE_DEVICE_LOCAL,
   };
+
+  // Fill variant pack.
+  //
+  // hipdnnEnginePluginCreateExecutionContext stored a map from uid -> fusilli
+  // TensorAttr for all boundary tensors. The framework will pass us the
+  // corresponding external hipmalloc-ed device buffer. Each buffer needs to be
+  // imported into IREE runtime, and cleaned up when the call is over (in the
+  // future we may want to cache the buffers and execution but that isn't
+  // implemented yet).
+  std::unordered_map<std::shared_ptr<fusilli::TensorAttr>,
+                     std::shared_ptr<fusilli::Buffer>>
+      variantPack;
   for (auto &[uid, tensorAttr] : executionContext->uidToFusilliTensorAttr) {
-    hipdnnPluginDeviceBuffer_t xBuffer = FUSILLI_PLUGIN_TRY(
+    // Find associated buffer.
+    hipdnnPluginDeviceBuffer_t hipMallocedBuffer = FUSILLI_PLUGIN_TRY(
         findDeviceBuffer(uid, deviceBuffers, numDeviceBuffers));
 
+    // Import external buffer into IREE runtime. This isn't allocating a buffer,
+    // it's making an existing allocation available to the IREE runtime.
     iree_hal_external_buffer_t externalBuffer = {
         .type = IREE_HAL_EXTERNAL_BUFFER_TYPE_DEVICE_ALLOCATION,
         .flags = 0,
@@ -470,7 +482,7 @@ hipdnnPluginStatus_t hipdnnEnginePluginExecuteOpGraph(
             {
                 .device_allocation =
                     {
-                        .ptr = (uint64_t)xBuffer.ptr,
+                        .ptr = (uint64_t)hipMallocedBuffer.ptr,
                     },
             },
     };
@@ -479,6 +491,7 @@ hipdnnPluginStatus_t hipdnnEnginePluginExecuteOpGraph(
         deviceAllocator, bufferParams, &externalBuffer,
         iree_hal_buffer_release_callback_null(), &importedBuffer));
 
+    // Create a buffer view for external buffer.
     iree_hal_buffer_view_t *outBufferView = nullptr;
     FUSILLI_PLUGIN_CHECK_ERROR(iree_hal_buffer_view_create(
         /*buffer=*/importedBuffer, /*shape_rank=*/tensorAttr->getDim().size(),
@@ -487,13 +500,22 @@ hipdnnPluginStatus_t hipdnnEnginePluginExecuteOpGraph(
         FUSILLI_PLUGIN_TRY(
             fusilliDataTypeToIreeHalDataType(tensorAttr->getDataType())),
         /*encoding_type=*/IREE_HAL_ENCODING_TYPE_DENSE_ROW_MAJOR,
-        /*host_allocator=*/ireeHoastAllocator,
+        /*host_allocator=*/ireeHostAllocator,
         /*out_buffer_view=*/&outBufferView));
 
+    // The buffer view retains the buffer, incrementing its reference count.
+    // Release our reference since the buffer view now holds one.
+    iree_hal_buffer_release(importedBuffer);
+
+    // Create fusilli::Buffer from buffer view. Buffer::import is a RAII that
+    // retains the buffer view, incrementing its reference count, on
+    // construction and releases the buffer view after it goes out of scope.
     variantPack[tensorAttr] = std::make_shared<fusilli::Buffer>(
         FUSILLI_PLUGIN_TRY(fusilli::Buffer::import(outBufferView)));
 
-    iree_hal_buffer_release(importedBuffer);
+    // Release our reference since the Buffer now holds one. The
+    // fusilli::Buffer in the variantPack holds the only reference to the buffer
+    // view, when it's destroyed the buffer view and buffer will be too.
     iree_hal_buffer_view_release(outBufferView);
   }
   FUSILLI_PLUGIN_CHECK_ERROR(executionContext->graph.execute(variantPack));

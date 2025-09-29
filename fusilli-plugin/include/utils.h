@@ -36,7 +36,7 @@ template <typename T> hipdnnPluginStatus_t isNull(T *value) {
   return HIPDNN_PLUGIN_STATUS_SUCCESS;
 }
 
-// TODO: convert to returning hipdnnPluginStatus_t
+// Find deviceBuffer with uid.
 inline fusilli::ErrorOr<hipdnnPluginDeviceBuffer_t>
 findDeviceBuffer(int64_t uid, const hipdnnPluginDeviceBuffer_t *deviceBuffers,
                  uint32_t numDeviceBuffers) {
@@ -114,6 +114,7 @@ findDeviceBuffer(int64_t uid, const hipdnnPluginDeviceBuffer_t *deviceBuffers,
     }                                                                          \
   } while (false)
 
+// Convert from fusilli DataType to iree hal data type.
 inline fusilli::ErrorOr<iree_hal_element_type_t>
 fusilliDataTypeToIreeHalDataType(fusilli::DataType fusilliDataType) {
   switch (fusilliDataType) {
