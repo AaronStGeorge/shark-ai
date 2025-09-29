@@ -13,9 +13,12 @@
 #ifndef FUSILLI_PLUGIN_SRC_UTILS_H
 #define FUSILLI_PLUGIN_SRC_UTILS_H
 
+#include "fusilli/attributes/types.h"
+#include "fusilli/support/logging.h"
 #include <hipdnn_sdk/plugin/PluginApiDataTypes.h>
 #include <hipdnn_sdk/plugin/PluginException.hpp>
 #include <hipdnn_sdk/plugin/PluginLastErrorManager.hpp>
+#include <iree/hal/buffer_view.h>
 
 // Checks for null, sets the plugin last error manager and returns error if
 // null.
@@ -34,19 +37,18 @@ template <typename T> hipdnnPluginStatus_t isNull(T *value) {
 }
 
 // TODO: convert to returning hipdnnPluginStatus_t
-inline hipdnnPluginDeviceBuffer_t
+inline fusilli::ErrorOr<hipdnnPluginDeviceBuffer_t>
 findDeviceBuffer(int64_t uid, const hipdnnPluginDeviceBuffer_t *deviceBuffers,
                  uint32_t numDeviceBuffers) {
   for (uint32_t i = 0; i < numDeviceBuffers; i++) {
     if (uid == deviceBuffers[i].uid) {
-      return deviceBuffers[i];
+      return fusilli::ok(deviceBuffers[i]);
     }
   }
 
-  throw hipdnn_plugin::HipdnnPluginException(
-      HIPDNN_PLUGIN_STATUS_INVALID_VALUE,
-      "Device buffer with the uid: " + std::to_string(uid) +
-          " not found in the provided device buffers.");
+  return fusilli::error(fusilli::ErrorCode::AttributeNotSet,
+                        "Device buffer with the uid: " + std::to_string(uid) +
+                            " not found in the provided device buffers.");
 }
 
 // If null, set plugin error manager last error to
@@ -111,5 +113,49 @@ findDeviceBuffer(int64_t uid, const hipdnnPluginDeviceBuffer_t *deviceBuffers,
           HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR, err.getMessage());              \
     }                                                                          \
   } while (false)
+
+inline fusilli::ErrorOr<iree_hal_element_type_t>
+fusilliDataTypeToIreeHalDataType(fusilli::DataType fusilliDataType) {
+  switch (fusilliDataType) {
+  case fusilli::DataType::Half:
+    return IREE_HAL_ELEMENT_TYPE_FLOAT_16;
+    break;
+  case fusilli::DataType::BFloat16:
+    return IREE_HAL_ELEMENT_TYPE_BFLOAT_16;
+    break;
+  case fusilli::DataType::Float:
+    return IREE_HAL_ELEMENT_TYPE_FLOAT_32;
+    break;
+  case fusilli::DataType::Double:
+    return IREE_HAL_ELEMENT_TYPE_FLOAT_64;
+    break;
+  case fusilli::DataType::Uint8:
+    return IREE_HAL_ELEMENT_TYPE_UINT_8;
+    break;
+  case fusilli::DataType::Int8:
+    return IREE_HAL_ELEMENT_TYPE_INT_8;
+    break;
+  case fusilli::DataType::Int16:
+    return IREE_HAL_ELEMENT_TYPE_INT_16;
+    break;
+  case fusilli::DataType::Int32:
+    return IREE_HAL_ELEMENT_TYPE_INT_32;
+    break;
+  case fusilli::DataType::Int64:
+    return IREE_HAL_ELEMENT_TYPE_INT_64;
+    break;
+  case fusilli::DataType::Boolean:
+    return IREE_HAL_ELEMENT_TYPE_BOOL_8;
+    break;
+  case fusilli::DataType::FP8E5M2:
+    return IREE_HAL_ELEMENT_TYPE_FLOAT_8_E5M2;
+    break;
+  case fusilli::DataType::NotSet:
+  default:
+    return fusilli::error(
+        fusilli::ErrorCode::InvalidAttribute,
+        "unknown data type in fusilli -> iree runtime data type conversion");
+  }
+}
 
 #endif // FUSILLI_PLUGIN_SRC_UTILS_H
