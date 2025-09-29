@@ -12,6 +12,8 @@
 //===----------------------------------------------------------------------===//
 
 // hipDNN logging expects COMPONENT_NAME to be defined
+#include <iree/hal/buffer.h>
+#include <iree/hal/buffer_view.h>
 #define COMPONENT_NAME FUSILLI_PLUGIN_NAME
 
 #include <flatbuffers/flatbuffers.h>
@@ -488,9 +490,11 @@ hipdnnPluginStatus_t hipdnnEnginePluginExecuteOpGraph(
         /*host_allocator=*/ireeHoastAllocator,
         /*out_buffer_view=*/&outBufferView));
 
-    // TODO: ensure outBufferView + importedBuffer are cleaned up properly.
     variantPack[tensorAttr] = std::make_shared<fusilli::Buffer>(
         FUSILLI_PLUGIN_TRY(fusilli::Buffer::import(outBufferView)));
+
+    iree_hal_buffer_release(importedBuffer);
+    iree_hal_buffer_view_release(outBufferView);
   }
   FUSILLI_PLUGIN_CHECK_ERROR(executionContext->graph.execute(variantPack));
 
