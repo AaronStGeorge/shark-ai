@@ -33,6 +33,22 @@ template <typename T> hipdnnPluginStatus_t isNull(T *value) {
   return HIPDNN_PLUGIN_STATUS_SUCCESS;
 }
 
+// TODO: convert to returning hipdnnPluginStatus_t
+inline hipdnnPluginDeviceBuffer_t
+findDeviceBuffer(int64_t uid, const hipdnnPluginDeviceBuffer_t *deviceBuffers,
+                 uint32_t numDeviceBuffers) {
+  for (uint32_t i = 0; i < numDeviceBuffers; i++) {
+    if (uid == deviceBuffers[i].uid) {
+      return deviceBuffers[i];
+    }
+  }
+
+  throw hipdnn_plugin::HipdnnPluginException(
+      HIPDNN_PLUGIN_STATUS_INVALID_VALUE,
+      "Device buffer with the uid: " + std::to_string(uid) +
+          " not found in the provided device buffers.");
+}
+
 // If null, set plugin error manager last error to
 // HIPDNN_PLUGIN_STATUS_BAD_PARAM and return said error from the enclosing
 // scope.
